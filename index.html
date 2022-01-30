@@ -1,0 +1,316 @@
+<html>
+<head>
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js"
+			type="text/javascript"></script>
+	<script type="text/javascript">
+		class cyclicBuffer {
+			constructor(length) {
+				this.index = 0;
+				this.arr = new Array(length).fill(0);
+				this.length = length;
+			}
+
+			insert(x) {
+				let oldVal = this.arr[this.index];
+				this.arr[this.index++] = x;
+				this.index %= this.length;
+				return oldVal;
+			}
+
+			* iterator() {
+				for (let i = 0; i < this.length; i++) {
+					yield this.arr[(i + this.index) % this.length];
+				}
+			}
+
+			* rev_iterator() {
+				for (let i = this.index - 1; i >= 0; i--) {
+					yield this.arr[i];
+				}
+				for (let i = this.length - 1; i >= this.index; i--) {
+					yield this.arr[i];
+				}
+			}
+		}
+
+		const BUF_SIZE = 2048;
+
+		const x_buf = new cyclicBuffer(BUF_SIZE);
+		const y_buf = new cyclicBuffer(BUF_SIZE);
+		const z_buf = new cyclicBuffer(BUF_SIZE);
+
+		// Called after form input is processed
+		function startConnect() {
+			// Generate a random client ID
+			clientID = "clientID-" + parseInt(Math.random() * 100);
+
+			// Fetch the hostname/IP address and port number from the form
+			host = document.getElementById("host").value;
+			port = document.getElementById("port").value;
+
+			// Print output for the user in the messages div
+			document.getElementById("status").innerHTML = '<span>Connecting to: ' + host + ' on port: ' + port + '</span><br/>';
+
+			// Initialize new Paho client connection
+			client = new Paho.MQTT.Client(host, Number(port), clientID);
+
+			// Set callback handlers
+			client.onConnectionLost = onConnectionLost;
+			client.onMessageArrived = onMessageArrived;
+
+			// Connect the client, if successful, call onConnect function
+			client.connect({
+				onSuccess: onConnect,
+			});
+		}
+
+		// Called when the client connects
+		function onConnect() {
+			// Fetch the MQTT topic from the form
+			topic = document.getElementById("topic").value;
+
+			// Print output for the user in the messages div
+			document.getElementById("status").innerHTML = '<span>Subscribing to: ' + topic + '</span>';
+
+			// Subscribe to the requested topic
+			client.subscribe(topic);
+
+			document.getElementById("status").innerHTML = 'Connected!';
+			document.getElementById("connect_button").innerText = "Disconnect";
+			document.getElementById("connect_button").onclick = startDisconnect;
+		}
+
+		// Called when the client loses its connection
+		function onConnectionLost(responseObject) {
+			document.getElementById("status").innerHTML = '<span>ERROR: Connection lost</span>';
+			if (responseObject.errorCode !== 0) {
+				document.getElementById("status").innerHTML = '<span>ERROR: ' + +responseObject.errorMessage + '</span>';
+			}
+		}
+
+		// Called when the disconnection button is pressed
+		function startDisconnect() {
+			client.disconnect();
+			document.getElementById("status").innerHTML = 'Disconnected';
+			document.getElementById("connect_button").innerText = "Connect";
+			document.getElementById("connect_button").onclick = startConnect;
+		}
+
+
+		let x_ctx;
+		let y_ctx;
+		let z_ctx;
+		let canvas_width = 1000;
+		let grid_location = 0;
+		const GRID_SPACE = 200;
+		let baseline_magnitude = 0.0001;
+
+		function shift_grid() {
+			grid_location = (grid_location - 2) % GRID_SPACE;
+		}
+
+		function drawHistory(context, buffer) {
+
+
+			context.clearRect(0, 0, canvas_width, 200);
+			context.beginPath();
+			context.strokeStyle = "#999999";
+			context.moveTo(0, 100);
+			context.lineTo(canvas_width, 100);
+			context.stroke();
+			context.beginPath();
+			context.strokeStyle = "#cccccc";
+			for (i = canvas_width + grid_location; i >= 0; i -= GRID_SPACE) {
+				context.moveTo(i, 0);
+				context.lineTo(i, 200);
+			}
+			context.stroke();
+
+			context.beginPath();
+			context.strokeStyle = "#115e8f";
+			let n = canvas_width;
+			let gen = buffer.rev_iterator();
+			r = gen.next();
+			context.moveTo(n, 100 - (r.value * 50));
+			n -= 2;
+			r = gen.next();
+			while (!r.done && n >= 0) {
+				context.lineTo(n, 100 - (r.value * 50));
+				n -= 2;
+				r = gen.next();
+			}
+			context.stroke();
+		}
+
+		function drawHistories() {
+			drawHistory(x_ctx, x_buf);
+			drawHistory(y_ctx, y_buf);
+			drawHistory(z_ctx, z_buf);
+		}
+
+		let curAmplitude = 0;
+		let maxAmplitude = 0;
+		let maxMagnitude = 0;
+
+		function getMagnitude(a, b, c) {
+			return Math.sqrt(a * a + b * b + c * c)
+		}
+
+		function update_magnitude() {
+			maxMagnitude = Math.log10(maxAmplitude / baseline_magnitude);
+			document.getElementById("max_magnitude").innerText = maxMagnitude.toFixed(3);
+		}
+
+		function resize_canvas() {
+			canvas_width = document.getElementById("canvas_container").clientWidth;
+			document.getElementById("x_canvas").width = canvas_width;
+			document.getElementById("y_canvas").width = canvas_width;
+			document.getElementById("z_canvas").width = canvas_width;
+			drawHistories();
+		}
+
+		function resize() {
+			resize_canvas();
+		}
+
+		window.onresize = resize;
+
+		function update_baseline(n) {
+			baseline_magnitude = n;
+			document.getElementById("base_amplitude").value = baseline_magnitude;
+		}
+
+		// Called when a message arrives
+		function onMessageArrived(message) {
+			console.log("got: " + message.payloadString);
+			msg = JSON.parse(message.payloadString);
+			if (msg.data) {
+				for (const entry of msg.data) {
+					x_buf.insert(Number(entry.x));
+					y_buf.insert(Number(entry.y));
+					z_buf.insert(Number(entry.z));
+					curAmplitude = getMagnitude(entry.x, entry.y, entry.z);
+					document.getElementById("amplitude").innerText = curAmplitude.toFixed(3);
+					if (curAmplitude > maxAmplitude) {
+						maxAmplitude = curAmplitude;
+						update_magnitude();
+						document.getElementById("max_amplitude").innerText = maxAmplitude.toFixed(3);
+					}
+					shift_grid();
+				}
+
+				drawHistories();
+			}
+			if (msg.baseline && document.getElementById("auto_update_baseline").checked) {
+				update_baseline(Number(msg.baseline));
+			}
+		}
+
+		function loaded() {
+			x_ctx = document.getElementById("x_canvas").getContext("2d");
+			y_ctx = document.getElementById("y_canvas").getContext("2d");
+			z_ctx = document.getElementById("z_canvas").getContext("2d");
+			update_baseline(0.0001);
+			resize();
+		}
+	</script>
+
+	<style>
+		canvas {
+			margin-top: 2px;
+			margin-bottom: 2px;
+			background-color: #ffffff;
+		}
+
+		#canvas_container {
+			display: flex;
+			flex: 1;
+			align-items: center;
+			flex-direction: column;
+			justify-content: center;
+		}
+
+		#port {
+			width: 6em;
+			min-width: 4em;
+		}
+
+		#host, #topic {
+			min-width: 10em;
+			flex: 1;
+		}
+
+		#connect_button {
+			flex: 1;
+			max-width: 8em;
+		}
+
+		.top_bar > input {
+			padding: 0.5em;
+		}
+
+		.status_bar {
+			padding: 0.5em;
+		}
+
+		.top_bar {
+			display: flex;
+			flex-direction: row;
+		}
+
+		.noise_data {
+			display: flex;
+			flex-direction: row;
+			padding: 0.5em;
+			background-color: #383867;
+		}
+
+		.noise_data > span {
+			flex: 1;
+		}
+
+		#base_amplitude {
+			width: 7em;
+			min-width: 4em;
+		}
+
+		body {
+			background-color: #50579c;
+			padding: 0;
+			margin: 0;
+			color: #ffffff;
+			font-family: ".SF NS Display", Arial;
+			font-size: large;
+			display: flex;
+			flex-direction: column;
+			height: 100vh;
+		}
+	</style>
+</head>
+<body onload="loaded()">
+<div class="top_bar">
+	<input type="text" placeholder="Broker address" id="host" value="broker.mqttdashboard.com">
+	<input type="number" placeholder="Broker port" id="port" value="8000">
+	<input type="text" placeholder="Topic" id="topic" value="testtopic/1012">
+	<button onclick="startConnect()" id="connect_button">Connect</button>
+</div>
+<div class="status_bar">
+	<span id="status">offline</span>
+</div>
+<div id="canvas_container">
+	<canvas id="x_canvas" width="1000" height="200"></canvas>
+	<canvas id="y_canvas" width="1000" height="200"></canvas>
+	<canvas id="z_canvas" width="1000" height="200"></canvas>
+</div>
+<div class="noise_data">
+	<span>amplitude: <span id="amplitude"></span></span>
+	<span>max amplitude: <span id="max_amplitude"></span></span>
+	<span>baseline amplitude: <input type="number" id="base_amplitude"
+									 onchange="baseline_magnitude = this.value;"><input type="checkbox"
+																						id="auto_update_baseline"
+																						checked="true"><label
+			for="auto_update_baseline">auto</label></span>
+	<span>max magnitude: <span id="max_magnitude"></span></span>
+</div>
+</body>
+</html>
