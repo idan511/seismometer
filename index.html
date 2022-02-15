@@ -72,7 +72,10 @@
 		}
 
 		let animation_interval = null;
-		let animation_speed = 0;
+		let animation_speed = 20;
+		let real_animation_speed = 20;
+		let last_packet_time = Date.now();
+		let last_interval = 30;
 
 		let frames = [];
 
@@ -81,6 +84,8 @@
 		const x_buf = new cyclicBuffer(BUF_SIZE);
 		const y_buf = new cyclicBuffer(BUF_SIZE);
 		const z_buf = new cyclicBuffer(BUF_SIZE);
+
+		let client;
 
 		// Called after form input is processed
 		function startConnect() {
@@ -157,17 +162,18 @@
 
 		function drawHistory(context, buffer) {
 			let middle = canvas_height / 2;
+			let fake_width = canvas_width - 21;
 
 
-			context.clearRect(0, 0, canvas_width, canvas_height);
+			context.clearRect(0, 0, fake_width, canvas_height);
 			context.beginPath();
-			context.strokeStyle = "#999999";
+			context.strokeStyle = "#ff8d8d";
 			context.moveTo(0, middle);
-			context.lineTo(canvas_width, middle);
+			context.lineTo(fake_width, middle);
 			context.stroke();
 			context.beginPath();
 			context.strokeStyle = "#cccccc";
-			for (i = canvas_width + grid_location; i >= 0; i -= GRID_SPACE) {
+			for (i = fake_width + grid_location; i >= 0; i -= GRID_SPACE) {
 				context.moveTo(i, 0);
 				context.lineTo(i, canvas_height);
 			}
@@ -175,7 +181,7 @@
 
 			context.beginPath();
 			context.strokeStyle = "#115e8f";
-			let n = canvas_width;
+			let n = fake_width;
 			let gen = buffer.rev_iterator();
 			r = gen.next();
 			context.moveTo(n, middle - (middle * r.value / GRAPH_MAX_VALUE));
@@ -187,6 +193,27 @@
 				r = gen.next();
 			}
 			context.stroke();
+
+			context.beginPath();
+			context.strokeStyle = "#404040";
+			context.moveTo(canvas_width - 21, 0);
+			context.lineTo(canvas_width - 21, canvas_height);
+			context.stroke();
+		}
+
+		function drawScale(context) {
+			context.font = "12px Arial";
+			context.fillText("2g", canvas_width - 17, 12);
+			context.fillText("0g", canvas_width - 17, (canvas_height / 2) + 5);
+			context.fillText("-2g", canvas_width - 18, canvas_height-6);
+
+
+		}
+
+		function drawScales() {
+			drawScale(x_ctx);
+			drawScale(y_ctx);
+			drawScale(z_ctx);
 		}
 
 		function drawHistories() {
@@ -215,6 +242,7 @@
 			scaleCanvas(document.getElementById("y_canvas"), y_ctx, canvas_width, canvas_height);
 			scaleCanvas(document.getElementById("z_canvas"), z_ctx, canvas_width, canvas_height);
 			drawHistories();
+			drawScales();
 		}
 
 		function resize() {
@@ -234,6 +262,12 @@
 				animation_interval = null;
 				return;
 			}
+			if (real_animation_speed !== animation_speed) {
+				real_animation_speed = real_animation_speed < animation_speed ? real_animation_speed + 1 : real_animation_speed - 1;
+				document.getElementById("sample_interval").innerText = real_animation_speed;
+				clearInterval(animation_interval);
+				animation_interval = setInterval(animation_frame, real_animation_speed);
+			}
 
 			let entry = frames.shift();
 			x_buf.insert(Number(entry[0]));
@@ -242,6 +276,8 @@
 
 			shift_grid();
 			drawHistories();
+
+
 		}
 
 
@@ -251,35 +287,40 @@
 			msg = JSON.parse(message.payloadString);
 			if (msg.interval != null) {
 				animation_speed = Number(msg.interval);
-
-				if (animation_interval != null) {
-					clearInterval(animation_interval);
-					animation_interval = setInterval(animation_frame, animation_speed);
-				}
 			}
-			if (msg.data) {
+			if (msg.data && msg.data.length > 0) {
+				let cur_time = Date.now();
+				let cur_interval = cur_time - last_packet_time;
+				let miliseconds_per_sample = (cur_interval + 500) / (msg.data.length + frames.length);
+				console.log(cur_interval / 1000 + " secs sinces last, " + frames.length + " queued samples, " + msg.data.length + " new samples");
+				let tmp = animation_speed;
+				animation_speed = Math.round((Math.min(miliseconds_per_sample, 60) + last_interval) / 2);
+				last_interval = tmp;
+				console.log(miliseconds_per_sample + " - " + animation_speed + " - " + real_animation_speed);
+
+				last_packet_time = cur_time;
 				for (const entry of msg.data) {
 					if (animation_speed === 0) {
-						x_buf.insert(Number(entry.x));
-						y_buf.insert(Number(entry.y));
-						z_buf.insert(Number(entry.z));
+						x_buf.insert(Number(entry[0]));
+						y_buf.insert(Number(entry[1]));
+						z_buf.insert(Number(entry[2]));
 
 						shift_grid();
 						drawHistories();
 					} else {
-						frames.push([Number(entry.x), Number(entry.y), Number(entry.z)]);
+						frames.push([Number(entry[0]), Number(entry[1]), Number(entry[2])]);
 
 						if (animation_interval == null) {
-							animation_interval = setInterval(animation_frame, animation_speed);
+							animation_interval = setInterval(animation_frame, real_animation_speed);
 						}
 					}
 
-					curAmplitude = getMagnitude(entry.x, entry.y, entry.z);
-					document.getElementById("amplitude").innerText = curAmplitude.toFixed(3);
+					curAmplitude = getMagnitude(entry[0], entry[1], entry[2]);
+					//document.getElementById("amplitude").innerText = curAmplitude.toFixed(3);
 					if (curAmplitude > maxAmplitude) {
 						maxAmplitude = curAmplitude;
-						update_magnitude();
-						document.getElementById("max_amplitude").innerText = maxAmplitude.toFixed(3);
+						//update_magnitude();
+						//document.getElementById("max_amplitude").innerText = maxAmplitude.toFixed(3);
 					}
 				}
 			}
@@ -294,6 +335,19 @@
 			z_ctx = document.getElementById("z_canvas").getContext("2d");
 			update_baseline(0.0001);
 			resize();
+			resize_canvas();
+		}
+
+		function update_threshold() {
+			if (client) {
+				document.getElementById("threshold_target").disabled = true;
+				message = new Paho.MQTT.Message(document.getElementById("threshold_target").value);
+				message.destinationName = "tonto2/set";
+				client.send(message);
+				setTimeout(() => {
+					document.getElementById("threshold_target").disabled = false;
+				}, 2000);
+			}
 		}
 	</script>
 
@@ -326,7 +380,7 @@
 			max-width: 8em;
 		}
 
-		.top_bar > input {
+		.top_bar > input, #threshold_target {
 			padding: 0.5em;
 		}
 
@@ -342,12 +396,21 @@
 		.noise_data {
 			display: flex;
 			flex-direction: row;
-			padding: 0.5em;
+			/*padding: 0.5em;*/
 			background-color: #383867;
 		}
 
 		.noise_data > span {
 			flex: 1;
+			display: flex;
+			flex-direction: row;
+			justify-content: flex-start;
+			align-items: stretch;
+		}
+
+		.noise_data > span > label {
+			display: flex;
+			align-items: center;
 		}
 
 		#base_amplitude {
@@ -369,11 +432,11 @@
 		}
 	</style>
 </head>
-<body onload="loaded()">
+<body onload="loaded();resize_canvas();">
 <div class="top_bar">
 	<input type="text" placeholder="Broker address" id="host" value="broker.mqttdashboard.com">
 	<input type="number" placeholder="Port" id="port" value="8000">
-	<input type="text" placeholder="Topic" id="topic" value="testtopic/1012">
+	<input type="text" placeholder="Topic" id="topic" value="tonto2">
 	<button onclick="startConnect()" id="connect_button">Connect</button>
 </div>
 <div class="status_bar">
@@ -385,14 +448,8 @@
 	<canvas id="z_canvas"></canvas>
 </div>
 <div class="noise_data">
-	<span>amplitude: <span id="amplitude"></span></span>
-	<span>max amplitude: <span id="max_amplitude"></span></span>
-	<span><label for="base_amplitude">baseline amplitude: </label><input type="number" id="base_amplitude"
-									 onchange="baseline_magnitude = this.value;"><input type="checkbox"
-																						id="auto_update_baseline"
-																						checked><label
-			for="auto_update_baseline">auto</label></span>
-	<span>max magnitude: <span id="max_magnitude"></span></span>
+	<span><label for="sample_interval">sample interval: </label><span id="sample_interval"></span><label for="sample_interval">ms</label></span>
+	<span style="flex: 0;"><label for="threshold_target">threshold: </label><input type="number" min="1" max="255" value="20" id="threshold_target"> <button onclick="update_threshold();">update</button></span>
 </div>
 </body>
 </html>
