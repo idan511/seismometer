@@ -160,7 +160,7 @@
 			grid_location = (grid_location - GRAPH_POINT_SPACE) % GRID_SPACE;
 		}
 
-		function drawHistory(context, buffer) {
+		function drawHistory(context, buffer, label) {
 			let middle = canvas_height / 2;
 			let fake_width = canvas_width - 21;
 
@@ -199,15 +199,21 @@
 			context.moveTo(canvas_width - 21, 0);
 			context.lineTo(canvas_width - 21, canvas_height);
 			context.stroke();
+
+			// draw label
+			if (label) {
+				context.font = "18px Arial";
+				context.strokeStyle = "#000000";
+				context.fillText(label, 5, 23);
+			}
 		}
 
 		function drawScale(context) {
 			context.font = "12px Arial";
+			context.strokeStyle = "#000000";
 			context.fillText("2g", canvas_width - 17, 12);
 			context.fillText("0g", canvas_width - 17, (canvas_height / 2) + 5);
 			context.fillText("-2g", canvas_width - 18, canvas_height-6);
-
-
 		}
 
 		function drawScales() {
@@ -217,9 +223,9 @@
 		}
 
 		function drawHistories() {
-			drawHistory(x_ctx, x_buf);
-			drawHistory(y_ctx, y_buf);
-			drawHistory(z_ctx, z_buf);
+			drawHistory(x_ctx, x_buf, "X");
+			drawHistory(y_ctx, y_buf, "Y");
+			drawHistory(z_ctx, z_buf, "Z");
 		}
 
 		let curAmplitude = 0;
@@ -251,11 +257,6 @@
 
 		window.onresize = resize;
 
-		function update_baseline(n) {
-			baseline_magnitude = n;
-			document.getElementById("base_amplitude").value = baseline_magnitude;
-		}
-
 		function animation_frame() {
 			if (frames.length === 0) {
 				clearInterval(animation_interval);
@@ -280,6 +281,10 @@
 
 		}
 
+		function date_to_string(date) {
+			return date.getDate() + "/" + (date.getMonth() + 1)+ "/" + date.getFullYear() + " " + date.getHours() + ":" + date.getMinutes() + ":" + date.getSeconds();
+		}
+
 
 		// Called when a message arrives
 		function onMessageArrived(message) {
@@ -290,6 +295,9 @@
 			}
 			if (msg.data && msg.data.length > 0) {
 				let cur_time = Date.now();
+				let cur_time_date = new Date(cur_time);
+				document.getElementById("l_packet").innerText = date_to_string(cur_time_date);
+
 				let cur_interval = cur_time - last_packet_time;
 				let miliseconds_per_sample = (cur_interval + 500) / (msg.data.length + frames.length);
 				console.log(cur_interval / 1000 + " secs sinces last, " + frames.length + " queued samples, " + msg.data.length + " new samples");
@@ -324,18 +332,13 @@
 					}
 				}
 			}
-			if (msg.baseline && document.getElementById("auto_update_baseline").checked) {
-				update_baseline(Number(msg.baseline));
-			}
 		}
 
 		function loaded() {
 			x_ctx = document.getElementById("x_canvas").getContext("2d");
 			y_ctx = document.getElementById("y_canvas").getContext("2d");
 			z_ctx = document.getElementById("z_canvas").getContext("2d");
-			update_baseline(0.0001);
 			resize();
-			resize_canvas();
 		}
 
 		function update_threshold() {
@@ -396,7 +399,7 @@
 		.noise_data {
 			display: flex;
 			flex-direction: row;
-			/*padding: 0.5em;*/
+			padding: 0.2em 0.5em;
 			background-color: #383867;
 		}
 
@@ -408,7 +411,7 @@
 			align-items: stretch;
 		}
 
-		.noise_data > span > label {
+		.noise_data > span > * {
 			display: flex;
 			align-items: center;
 		}
@@ -432,7 +435,7 @@
 		}
 	</style>
 </head>
-<body onload="loaded();resize_canvas();">
+<body onload="loaded();">
 <div class="top_bar">
 	<input type="text" placeholder="Broker address" id="host" value="broker.mqttdashboard.com">
 	<input type="number" placeholder="Port" id="port" value="8000">
@@ -448,8 +451,9 @@
 	<canvas id="z_canvas"></canvas>
 </div>
 <div class="noise_data">
-	<span><label for="sample_interval">sample interval: </label><span id="sample_interval"></span><label for="sample_interval">ms</label></span>
-	<span style="flex: 0;"><label for="threshold_target">threshold: </label><input type="number" min="1" max="255" value="20" id="threshold_target"> <button onclick="update_threshold();">update</button></span>
+	<span><label for="sample_interval">sample interval:&nbsp;</label><span id="sample_interval"></span><label for="sample_interval">ms</label></span>
+	<span><label for="sample_interval">last packet:&nbsp;</label><span id="l_packet">never</span></span>
+	<span style="flex: 0;"><label for="threshold_target">threshold:&nbsp;</label><input type="number" min="1" max="255" value="20" id="threshold_target"> <button onclick="update_threshold();">update</button></span>
 </div>
 </body>
 </html>
