@@ -10,7 +10,7 @@ Calibration (implemented in base_maker.c)
 
 The calibration takes a predefined number of samples (1024) and computes an average
 for each of the axis (denoted as E[x], E[y], E[z]).
-In order to make sure the samples are good, we make sure the variacnce of the samples
+In order to make sure the samples are good, we make sure the variance of the samples
 is below a certain threshold.
 After, sampling we take the vector (E[x], E[y], E[z]) and consider it our true Z vector.
 In order to compute our true X & Y vectors we need to compute 2 orthogonal vectors to Z.
@@ -26,11 +26,12 @@ Earthquake handling
 ------------------------------------------------------------
 
 On register 0x1F of MPU6050, we can define a threshold for the MPU's interrupt pin to
-turn high, subsequently causing an interrupt in the MCU. once the interrupt is recieved,
+turn high, subsequently causing an interrupt in the MCU. once the interrupt is received,
 the MCU takes samples in a predefined interval, processes them, and batches them up
 using collector.h. Once a batch is full, it is sent via mqtt to a broker.
 
-Once the samples variance falls below a threshold, the event is over, the MPU's interrupt is cleared and the MCU goes idle.
+Once the samples variance falls below a threshold, the event is over, the MPU's interrupt
+is cleared and the MCU goes idle.
 
 ------------------------------------------------------------
 Remote configuration
@@ -45,7 +46,7 @@ Pinging
 ------------------------------------------------------------
 
 Every 30 seconds of inactivity, a ping is sent to the server in order to keep the
-connection alive. This is implemeneted using a timer & an interrupt.
+connection alive. This is implemented using a timer & an interrupt.
 
 ------------------------------------------------------------
 Buttons
